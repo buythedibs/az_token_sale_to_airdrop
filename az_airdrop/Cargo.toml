@@ -1,5 +1,5 @@
 [package]
-name = "az_token_sale_to_airdrop"
+name = "az_airdrop"
 version = "0.1.0"
 authors = ["DIBS"]
 edition = "2021"
@@ -16,11 +16,6 @@ primitive-types = { version = "0.12.2", default-features = false, features = ["s
 scale = { package = "parity-scale-codec", version = "3", default-features = false, features = ["derive"] }
 scale-info = { version = "2.5", default-features = false, features = ["derive"], optional = true }
 
-[dev-dependencies]
-az_airdrop = { path = "./az_airdrop", default-features = false, features = ["ink-as-dependency"] }
-az_button = { path = "./az_button", default-features = false, features = ["ink-as-dependency"] }
-ink_e2e = "4.3.0"
-
 [lib]
 path = "lib.rs"
 
@@ -33,10 +28,3 @@ std = [
     "scale-info/std",
 ]
 ink-as-dependency = []
-e2e-tests = []
-
-[workspace]
-members = [
-    "az_airdrop",
-    "az_button",
-]
