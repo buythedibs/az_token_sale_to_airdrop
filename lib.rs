@@ -16,7 +16,6 @@ mod az_token_sale_to_airdrop {
     pub struct Config {
         admin: AccountId,
         airdrop: AccountId,
-        token: AccountId,
         start: Timestamp,
         end: Timestamp,
         whitelist_duration: Timestamp,
@@ -27,7 +26,6 @@ mod az_token_sale_to_airdrop {
     pub struct AzTokenSaleToAirdrop {
         admin: AccountId,
         airdrop: AccountId,
-        token: AccountId,
         start: Timestamp,
         end: Timestamp,
         whitelist: Mapping<AccountId, AccountId>,
@@ -37,7 +35,6 @@ mod az_token_sale_to_airdrop {
         #[ink(constructor)]
         pub fn new(
             airdrop: AccountId,
-            token: AccountId,
             start: Timestamp,
             end: Timestamp,
             whitelist_duration: Timestamp,
@@ -45,7 +42,6 @@ mod az_token_sale_to_airdrop {
             Self {
                 admin: Self::env().caller(),
                 airdrop,
-                token,
                 start,
                 end,
                 whitelist: Mapping::default(),
@@ -59,7 +55,6 @@ mod az_token_sale_to_airdrop {
             Config {
                 admin: self.admin,
                 airdrop: self.airdrop,
-                token: self.token,
                 start: self.start,
                 end: self.end,
                 whitelist_duration: self.whitelist_duration,
@@ -127,7 +122,6 @@ mod az_token_sale_to_airdrop {
             set_caller::<DefaultEnvironment>(accounts.bob);
             let az_token_sale_to_airdrop = AzTokenSaleToAirdrop::new(
                 mock_airdrop(),
-                mock_token(),
                 MOCK_START,
                 MOCK_END,
                 MOCK_WHITELIST_DURATION,
@@ -140,11 +134,6 @@ mod az_token_sale_to_airdrop {
             accounts.eve
         }
 
-        fn mock_token() -> AccountId {
-            let accounts: DefaultAccounts<DefaultEnvironment> = default_accounts();
-            accounts.django
-        }
-
         // === TESTS ===
         #[ink::test]
         fn test_config() {
@@ -153,7 +142,6 @@ mod az_token_sale_to_airdrop {
             // * it returns the config
             assert_eq!(config.admin, az_token_sale_to_airdrop.admin);
             assert_eq!(config.airdrop, az_token_sale_to_airdrop.airdrop);
-            assert_eq!(config.token, az_token_sale_to_airdrop.token);
             assert_eq!(config.start, az_token_sale_to_airdrop.start);
             assert_eq!(config.end, az_token_sale_to_airdrop.end);
             assert_eq!(
