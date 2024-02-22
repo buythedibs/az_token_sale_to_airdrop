@@ -83,6 +83,22 @@ mod az_token_sale_to_airdrop {
             Ok(address)
         }
 
+        #[ink(message)]
+        pub fn whitelist_remove(&mut self, address: AccountId) -> Result<AccountId> {
+            let caller: AccountId = Self::env().caller();
+            Self::authorise(caller, self.admin)?;
+
+            if self.whitelist.get(address).is_none() {
+                return Err(AzTokenSaleToAirdropError::UnprocessableEntity(
+                    "Not on whitelist".to_string(),
+                ));
+            } else {
+                self.whitelist.remove(address);
+            }
+
+            Ok(address)
+        }
+
         // === PRIVATE ===
         fn authorise(allowed: AccountId, received: AccountId) -> Result<()> {
             if allowed != received {
@@ -176,6 +192,40 @@ mod az_token_sale_to_airdrop {
             // * it raises an error
             set_caller::<DefaultEnvironment>(accounts.charlie);
             result = az_token_sale_to_airdrop.whitelist_add(new_address);
+            assert_eq!(result, Err(AzTokenSaleToAirdropError::Unauthorised));
+        }
+
+        #[ink::test]
+        fn test_whitelist_remove() {
+            let (accounts, mut az_token_sale_to_airdrop) = init();
+            let address_to_remove: AccountId = accounts.django;
+            // when called by admin
+            // = when not on whitelist
+            let mut result = az_token_sale_to_airdrop.whitelist_remove(address_to_remove);
+            assert_eq!(
+                result,
+                Err(AzTokenSaleToAirdropError::UnprocessableEntity(
+                    "Not on whitelist".to_string()
+                ))
+            );
+            // = when on whitelist
+            az_token_sale_to_airdrop
+                .whitelist_add(address_to_remove)
+                .unwrap();
+            result = az_token_sale_to_airdrop.whitelist_remove(address_to_remove);
+            result.unwrap();
+            // = * it remove the address from whitelist
+            assert_eq!(
+                az_token_sale_to_airdrop
+                    .whitelist
+                    .get(address_to_remove)
+                    .is_some(),
+                false
+            );
+            // when called by non admin
+            // * it raises an error
+            set_caller::<DefaultEnvironment>(accounts.charlie);
+            result = az_token_sale_to_airdrop.whitelist_remove(address_to_remove);
             assert_eq!(result, Err(AzTokenSaleToAirdropError::Unauthorised));
         }
     }
