@@ -1,5 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std, no_main)]
 
+pub use self::az_airdrop::AzAirdropRef;
+
 mod errors;
 
 #[ink::contract]
@@ -57,14 +59,14 @@ mod az_airdrop {
         derive(scale_info::TypeInfo, ink::storage::traits::StorageLayout)
     )]
     pub struct Recipient {
-        total_amount: Balance,
-        collected: Balance,
+        pub total_amount: Balance,
+        pub collected: Balance,
         // % of total_amount
-        collectable_at_tge_percentage: u8,
+        pub collectable_at_tge_percentage: u8,
         // ms from start user has to wait before either starting vesting, or collecting remaining available.
-        cliff_duration: Timestamp,
+        pub cliff_duration: Timestamp,
         // ms to collect all remaining after collection at tge
-        vesting_duration: Timestamp,
+        pub vesting_duration: Timestamp,
     }
 
     // === CONTRACT ===

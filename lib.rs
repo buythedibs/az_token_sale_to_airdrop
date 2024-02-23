@@ -5,7 +5,15 @@ mod errors;
 #[ink::contract]
 mod az_token_sale_to_airdrop {
     use crate::errors::AzTokenSaleToAirdropError;
-    use ink::{prelude::string::ToString, storage::Mapping};
+    use ink::{
+        env::{
+            call::{build_call, Call, ExecutionInput, Selector},
+            CallFlags,
+        },
+        prelude::string::{String, ToString},
+        storage::Mapping,
+    };
+    use primitive_types::U256;
 
     // === TYPES ===
     type Result<T> = core::result::Result<T, AzTokenSaleToAirdropError>;
@@ -33,6 +41,19 @@ mod az_token_sale_to_airdrop {
         whitelist_duration: Timestamp,
         in_target: Balance,
         in_raised: Balance,
+    }
+
+    #[derive(Debug, Clone, scale::Encode, scale::Decode)]
+    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
+    pub struct Recipient {
+        pub total_amount: Balance,
+        pub collected: Balance,
+        // % of total_amount
+        pub collectable_at_tge_percentage: u8,
+        // ms from start user has to wait before either starting vesting, or collecting remaining available.
+        pub cliff_duration: Timestamp,
+        // ms to collect all remaining after collection at tge
+        pub vesting_duration: Timestamp,
     }
 
     // === CONTRACT ===
@@ -90,6 +111,14 @@ mod az_token_sale_to_airdrop {
             }
         }
 
+        #[ink(message)]
+        pub fn show(&self, address: AccountId) -> Buyer {
+            self.buyers.get(address).unwrap_or(Buyer {
+                total_in: 0,
+                whitelisted: false,
+            })
+        }
+
         // === HANDLES ===
         #[ink(message, payable)]
         pub fn buy(&mut self) -> Result<(Balance, Balance)> {
@@ -108,10 +137,7 @@ mod az_token_sale_to_airdrop {
             }
             // validate user is on whitelist if during whitelist duration
             let caller: AccountId = Self::env().caller();
-            let mut buyer: Buyer = self.buyers.get(caller).unwrap_or(Buyer {
-                total_in: 0,
-                whitelisted: false,
-            });
+            let mut buyer: Buyer = self.show(caller);
             if self.whitelist_duration > 0
                 && block_timestamp < (self.start + self.whitelist_duration)
             {
@@ -122,7 +148,7 @@ mod az_token_sale_to_airdrop {
                 }
             }
             // validate in amount is in units of in_unit
-            let in_amount: Balance = self.env().transferred_value();
+            let mut in_amount: Balance = self.env().transferred_value();
             if in_amount == 0 || in_amount % self.in_unit > 0 {
                 return Err(AzTokenSaleToAirdropError::UnprocessableEntity(
                     "In amount must be in multiples of in_unit".to_string(),
@@ -134,7 +160,33 @@ mod az_token_sale_to_airdrop {
                     "Sold out".to_string(),
                 ));
             }
-            let out_amount: Balance = in_amount * self.out_unit / self.in_unit;
+            let new_in_amount: Balance = self.in_target - self.in_raised;
+            if in_amount > new_in_amount {
+                let refund_amount: Balance = in_amount - new_in_amount;
+                self.transfer_azero(caller, refund_amount)?;
+                in_amount = new_in_amount
+            }
+            let out_amount: Balance = (U256::from(in_amount) * U256::from(self.out_unit)
+                / U256::from(self.in_unit))
+            .as_u128();
+            let description: Option<String> = None;
+            // Add amount to airdrop contract
+            build_call::<super::az_token_sale_to_airdrop::Environment>()
+                .call_type(Call::new(self.airdrop_smart_contract))
+                .exec_input(
+                    ExecutionInput::new(Selector::new(ink::selector_bytes!("add_to_recipient")))
+                        .push_arg(caller)
+                        .push_arg(out_amount)
+                        .push_arg(description),
+                )
+                .call_flags(CallFlags::default())
+                .returns::<core::result::Result<Recipient, AzTokenSaleToAirdropError>>()
+                .invoke()?;
+            // Send AZERO to admin
+            self.transfer_azero(self.admin, in_amount)?;
+            self.in_raised += in_amount;
+            buyer.total_in += in_amount;
+            self.buyers.insert(caller, &buyer);
 
             Ok((in_amount, out_amount))
         }
@@ -144,10 +196,7 @@ mod az_token_sale_to_airdrop {
             let caller: AccountId = Self::env().caller();
             Self::authorise(caller, self.admin)?;
 
-            let mut buyer: Buyer = self.buyers.get(address).unwrap_or(Buyer {
-                total_in: 0,
-                whitelisted: false,
-            });
+            let mut buyer: Buyer = self.show(address);
             if buyer.whitelisted {
                 return Err(AzTokenSaleToAirdropError::UnprocessableEntity(
                     "Already on whitelist".to_string(),
@@ -165,10 +214,7 @@ mod az_token_sale_to_airdrop {
             let caller: AccountId = Self::env().caller();
             Self::authorise(caller, self.admin)?;
 
-            let mut buyer: Buyer = self.buyers.get(address).unwrap_or(Buyer {
-                total_in: 0,
-                whitelisted: false,
-            });
+            let mut buyer: Buyer = self.show(address);
             if buyer.whitelisted {
                 buyer.whitelisted = false;
                 self.buyers.insert(address, &buyer);
@@ -185,6 +231,16 @@ mod az_token_sale_to_airdrop {
         fn authorise(allowed: AccountId, received: AccountId) -> Result<()> {
             if allowed != received {
                 return Err(AzTokenSaleToAirdropError::Unauthorised);
+            }
+
+            Ok(())
+        }
+
+        fn transfer_azero(&self, address: AccountId, amount: Balance) -> Result<()> {
+            if self.env().transfer(address, amount).is_err() {
+                return Err(AzTokenSaleToAirdropError::UnprocessableEntity(
+                    "Insufficient AZERO balance".to_string(),
+                ));
             }
 
             Ok(())
@@ -409,6 +465,226 @@ mod az_token_sale_to_airdrop {
             set_caller::<DefaultEnvironment>(accounts.charlie);
             result = az_token_sale_to_airdrop.whitelist_remove(address_to_remove);
             assert_eq!(result, Err(AzTokenSaleToAirdropError::Unauthorised));
+        }
+    }
+    // The main purpose of the e2e tests are to test the interactions with az groups contract
+    #[cfg(all(test, feature = "e2e-tests"))]
+    mod e2e_tests {
+        use super::*;
+        use crate::az_token_sale_to_airdrop::AzTokenSaleToAirdropRef;
+        use az_airdrop::AzAirdropRef;
+        use az_button::ButtonRef;
+        use ink_e2e::build_message;
+        use ink_e2e::Keypair;
+        use openbrush::contracts::traits::psp22::psp22_external::PSP22;
+
+        // === CONSTANT ===
+        // Token sale
+        const MOCK_IN_UNIT: Balance = 1_000_000_000_000;
+        const MOCK_OUT_UNIT: Balance = 50_000_000_000_000;
+        const MOCK_START: Timestamp = 708_669_904_756;
+        const MOCK_END: Timestamp = 2_708_669_904_756;
+        const MOCK_WHITELIST_DURATION: Timestamp = 0;
+        const MOCK_IN_TARGET: Balance = 50_000_000_000_000_000;
+
+        // Airdrop
+        const MOCK_AIRDROP_START: Timestamp = 2_708_669_904_756;
+
+        // Token
+        const MOCK_AMOUNT: Balance = 100_000_000_000_000_000_000;
+
+        // === TYPES ===
+        type E2EResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+        // === HELPERS ===
+        fn account_id(k: Keypair) -> AccountId {
+            AccountId::try_from(k.public_key().to_account_id().as_ref())
+                .expect("account keyring has a valid account id")
+        }
+
+        // === TEST HANDLES ===
+        #[ink_e2e::test]
+        async fn test_buy(mut client: ::ink_e2e::Client<C, E>) -> E2EResult<()> {
+            let alice_account_id: AccountId = account_id(ink_e2e::alice());
+            let bob_account_id: AccountId = account_id(ink_e2e::bob());
+
+            // Instantiate token
+            let token_constructor = ButtonRef::new(
+                MOCK_AMOUNT,
+                Some("DIBS".to_string()),
+                Some("DIBS".to_string()),
+                12,
+            );
+            let token_id: AccountId = client
+                .instantiate("az_button", &ink_e2e::alice(), token_constructor, 0, None)
+                .await
+                .expect("Token instantiate failed")
+                .account_id;
+
+            // Instantiate airdrop smart contract
+            let default_collectable_at_tge_percentage: u8 = 20;
+            let default_cliff_duration: Timestamp = 0;
+            let default_vesting_duration: Timestamp = 31_556_952_000;
+            let airdrop_constructor = AzAirdropRef::new(
+                token_id,
+                MOCK_AIRDROP_START,
+                default_collectable_at_tge_percentage,
+                default_cliff_duration,
+                default_vesting_duration,
+            );
+            let airdrop_id: AccountId = client
+                .instantiate(
+                    "az_airdrop",
+                    &ink_e2e::alice(),
+                    airdrop_constructor,
+                    0,
+                    None,
+                )
+                .await
+                .expect("Airdrop instantiate failed")
+                .account_id;
+            // send tokens to airdrop smart contract
+            let transfer_message = build_message::<ButtonRef>(token_id)
+                .call(|button| button.transfer(airdrop_id, MOCK_AMOUNT, vec![]));
+            let transfer_result = client
+                .call(&ink_e2e::alice(), transfer_message, 0, None)
+                .await
+                .unwrap()
+                .dry_run
+                .exec_result
+                .result;
+            assert!(transfer_result.is_ok());
+
+            // Instantiate token sale smart contract
+            let token_sale_contractor = AzTokenSaleToAirdropRef::new(
+                airdrop_id,
+                MOCK_IN_UNIT,
+                MOCK_OUT_UNIT,
+                MOCK_START,
+                MOCK_END,
+                MOCK_WHITELIST_DURATION,
+                MOCK_IN_TARGET,
+            );
+            let token_sale_id: AccountId = client
+                .instantiate(
+                    "az_token_sale_to_airdrop",
+                    &ink_e2e::alice(),
+                    token_sale_contractor,
+                    0,
+                    None,
+                )
+                .await
+                .expect("Token sale instantiate failed")
+                .account_id;
+            // add token_sale_id as sub-admin of airdrop smart contract
+            let sub_admins_add_message = build_message::<AzAirdropRef>(airdrop_id)
+                .call(|airdrop| airdrop.sub_admins_add(token_sale_id));
+            let sub_admins_add_result = client
+                .call(&ink_e2e::alice(), sub_admins_add_message, 0, None)
+                .await
+                .unwrap()
+                .dry_run
+                .exec_result
+                .result;
+            assert!(sub_admins_add_result.is_ok());
+
+            // when sale has started
+            // = when in public phase
+            // == when in amount is positive
+            // === when in amount is a multiple of in_unit
+            // ==== when there is enough stock to fill full order
+            let original_alice_azero_balance: Balance =
+                client.balance(alice_account_id).await.unwrap();
+            let original_bob_azero_balance: Balance = client.balance(bob_account_id).await.unwrap();
+            let buy_message = build_message::<AzTokenSaleToAirdropRef>(token_sale_id)
+                .call(|token_sale| token_sale.buy());
+            let buy_result = client
+                .call(&ink_e2e::bob(), buy_message, MOCK_IN_UNIT, None)
+                .await
+                .unwrap()
+                .dry_run
+                .exec_result
+                .result;
+            assert!(buy_result.is_ok());
+            // ==== * it increases the recipient amount on airdrop by the out amount
+            let airdrop_show_message = build_message::<AzAirdropRef>(airdrop_id)
+                .call(|airdrop| airdrop.show(bob_account_id));
+            let result = client
+                .call_dry_run(&ink_e2e::alice(), &airdrop_show_message, 0, None)
+                .await
+                .return_value();
+            assert_eq!(result.unwrap().total_amount, MOCK_OUT_UNIT);
+            // ==== * it increases the in_raised by the in amount
+            let config_message = build_message::<AzTokenSaleToAirdropRef>(token_sale_id)
+                .call(|token_sale| token_sale.config());
+            let result = client
+                .call_dry_run(&ink_e2e::alice(), &config_message, 0, None)
+                .await
+                .return_value();
+            assert_eq!(result.in_raised, MOCK_IN_UNIT);
+            // ==== * it increases the buyers total_in amount
+            let buyer_show_message = build_message::<AzTokenSaleToAirdropRef>(token_sale_id)
+                .call(|token_sale| token_sale.show(bob_account_id));
+            let result = client
+                .call_dry_run(&ink_e2e::alice(), &buyer_show_message, 0, None)
+                .await
+                .return_value();
+            assert_eq!(result.total_in, MOCK_IN_UNIT);
+            // ==== * it sends the in_amount to the admin
+            assert_eq!(
+                client.balance(alice_account_id).await.unwrap(),
+                original_alice_azero_balance + MOCK_IN_UNIT
+            );
+            // ==== when there is only enough stock to partially fill order
+            let buy_message = build_message::<AzTokenSaleToAirdropRef>(token_sale_id)
+                .call(|token_sale| token_sale.buy());
+            let buy_result = client
+                .call(&ink_e2e::bob(), buy_message, MOCK_IN_TARGET, None)
+                .await
+                .unwrap()
+                .dry_run
+                .exec_result
+                .result;
+            assert!(buy_result.is_ok());
+            // ==== * it increases the recipient amount on airdrop by the available out amount
+            let airdrop_show_message = build_message::<AzAirdropRef>(airdrop_id)
+                .call(|airdrop| airdrop.show(bob_account_id));
+            let result = client
+                .call_dry_run(&ink_e2e::alice(), &airdrop_show_message, 0, None)
+                .await
+                .return_value();
+            assert_eq!(
+                result.unwrap().total_amount,
+                MOCK_OUT_UNIT * MOCK_IN_TARGET / MOCK_IN_UNIT
+            );
+            // ==== * it increases the in_raised by the avaiable in amount
+            let config_message = build_message::<AzTokenSaleToAirdropRef>(token_sale_id)
+                .call(|token_sale| token_sale.config());
+            let result = client
+                .call_dry_run(&ink_e2e::alice(), &config_message, 0, None)
+                .await
+                .return_value();
+            assert_eq!(result.in_raised, MOCK_IN_TARGET);
+            // ==== * it increases the buyers total_in by the available amount
+            let buyer_show_message = build_message::<AzTokenSaleToAirdropRef>(token_sale_id)
+                .call(|token_sale| token_sale.show(bob_account_id));
+            let result = client
+                .call_dry_run(&ink_e2e::alice(), &buyer_show_message, 0, None)
+                .await
+                .return_value();
+            assert_eq!(result.total_in, MOCK_IN_TARGET);
+            // ==== * it sends the in_amount to the admin
+            assert_eq!(
+                client.balance(alice_account_id).await.unwrap(),
+                original_alice_azero_balance + MOCK_IN_TARGET
+            );
+            // ==== * it refunds the unused in_amount
+            assert!(
+                client.balance(bob_account_id).await.unwrap()
+                    > original_bob_azero_balance - MOCK_IN_TARGET - MOCK_IN_UNIT
+            );
+
+            Ok(())
         }
     }
 }
