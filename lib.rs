@@ -190,7 +190,7 @@ mod az_token_sale_to_airdrop {
             build_call::<super::az_token_sale_to_airdrop::Environment>()
                 .call_type(Call::new(self.airdrop_smart_contract))
                 .exec_input(
-                    ExecutionInput::new(Selector::new(ink::selector_bytes!("add_to_recipient")))
+                    ExecutionInput::new(Selector::new(ink::selector_bytes!("recipient_add")))
                         .push_arg(caller)
                         .push_arg(out_amount)
                         .push_arg(description),
