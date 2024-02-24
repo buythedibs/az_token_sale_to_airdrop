@@ -1,5 +1,7 @@
 # Aleph Zero Token Sale To Airdrop Smart Contract
 
+Decided not to allow the updating of the config. If details need to be changed, the token sale smart contract should be removed from sub admins and a new contract should be instantiated.
+
 ## Getting Started
 
 ### Prerequisites
