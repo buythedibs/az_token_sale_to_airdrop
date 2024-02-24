@@ -17,7 +17,7 @@ scale = { package = "parity-scale-codec", version = "3", default-features = fals
 scale-info = { version = "2.5", default-features = false, features = ["derive"], optional = true }
 
 [dev-dependencies]
-az_airdrop = { path = "./az_airdrop", default-features = false, features = ["ink-as-dependency"] }
+az_airdrop = { path = "../az_airdrop", default-features = false, features = ["ink-as-dependency"] }
 az_button = { path = "./az_button", default-features = false, features = ["ink-as-dependency"] }
 ink_e2e = "4.3.0"
 
@@ -37,6 +37,5 @@ e2e-tests = []
 
 [workspace]
 members = [
-    "az_airdrop",
     "az_button",
 ]
