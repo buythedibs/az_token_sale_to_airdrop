@@ -25,22 +25,22 @@ mod az_token_sale_to_airdrop {
         derive(scale_info::TypeInfo, ink::storage::traits::StorageLayout)
     )]
     pub struct Buyer {
-        total_in: Balance,
-        whitelisted: bool,
+        pub total_in: Balance,
+        pub whitelisted: bool,
     }
 
     #[derive(Debug, Clone, scale::Encode, scale::Decode)]
     #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
     pub struct Config {
-        admin: AccountId,
-        airdrop_smart_contract: AccountId,
-        in_unit: Balance,
-        out_unit: Balance,
-        start: Timestamp,
-        end: Timestamp,
-        whitelist_duration: Timestamp,
-        in_target: Balance,
-        in_raised: Balance,
+        pub admin: AccountId,
+        pub airdrop_smart_contract: AccountId,
+        pub in_unit: Balance,
+        pub out_unit: Balance,
+        pub start: Timestamp,
+        pub end: Timestamp,
+        pub whitelist_duration: Timestamp,
+        pub in_target: Balance,
+        pub in_raised: Balance,
     }
 
     #[derive(Debug, Clone, scale::Encode, scale::Decode)]
