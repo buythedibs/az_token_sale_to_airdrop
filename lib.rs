@@ -80,8 +80,24 @@ mod az_token_sale_to_airdrop {
             end: Timestamp,
             whitelist_duration: Timestamp,
             in_target: Balance,
-        ) -> Self {
-            Self {
+        ) -> Result<Self> {
+            if start + whitelist_duration >= end {
+                return Err(AzTokenSaleToAirdropError::UnprocessableEntity(
+                    "Start + whitelist_duration must be less than end".to_string(),
+                ));
+            }
+            if in_unit == 0 || out_unit == 0 || in_target == 0 {
+                return Err(AzTokenSaleToAirdropError::UnprocessableEntity(
+                    "In unit, out unit and in target must be positive".to_string(),
+                ));
+            }
+            if in_target % in_unit > 0 {
+                return Err(AzTokenSaleToAirdropError::UnprocessableEntity(
+                    "In target must be a multiple of in unit".to_string(),
+                ));
+            }
+
+            Ok(Self {
                 admin: Self::env().caller(),
                 airdrop_smart_contract,
                 in_unit,
@@ -92,7 +108,7 @@ mod az_token_sale_to_airdrop {
                 whitelist_duration,
                 in_target,
                 in_raised: 0,
-            }
+            })
         }
 
         // === QUERIES ===
@@ -255,8 +271,8 @@ mod az_token_sale_to_airdrop {
             DefaultEnvironment,
         };
 
-        const MOCK_IN_UNIT: Balance = 654_654;
-        const MOCK_OUT_UNIT: Balance = 654_654;
+        const MOCK_IN_UNIT: Balance = 10;
+        const MOCK_OUT_UNIT: Balance = 500;
         const MOCK_START: Timestamp = 654_654;
         const MOCK_END: Timestamp = 754_654;
         const MOCK_WHITELIST_DURATION: Timestamp = 1_000;
@@ -275,7 +291,7 @@ mod az_token_sale_to_airdrop {
                 MOCK_WHITELIST_DURATION,
                 MOCK_IN_TARGET,
             );
-            (accounts, az_token_sale_to_airdrop)
+            (accounts, az_token_sale_to_airdrop.expect("REASON"))
         }
 
         fn mock_airdrop_smart_contract() -> AccountId {
@@ -284,6 +300,87 @@ mod az_token_sale_to_airdrop {
         }
 
         // === TESTS ===
+        // === TEST CONSTRUCTOR ===
+        #[ink::test]
+        fn test_new() {
+            let result = AzTokenSaleToAirdrop::new(
+                mock_airdrop_smart_contract(),
+                MOCK_IN_UNIT,
+                MOCK_OUT_UNIT,
+                10,
+                20,
+                10,
+                MOCK_IN_TARGET,
+            );
+            // when start + whitelist_duration is greater than or equal to end
+            // * it raises an error
+            assert!(result.is_err());
+            // when start + whitelist_duration is less than end
+            // == when in_unit is zero
+            // == * it raises an error
+            let result = AzTokenSaleToAirdrop::new(
+                mock_airdrop_smart_contract(),
+                0,
+                MOCK_OUT_UNIT,
+                MOCK_START,
+                MOCK_END,
+                MOCK_WHITELIST_DURATION,
+                MOCK_IN_TARGET,
+            );
+            assert!(result.is_err());
+            // == when in_unit is positive
+            // === when out_unit is zero
+            // === * it raises an error
+            let result = AzTokenSaleToAirdrop::new(
+                mock_airdrop_smart_contract(),
+                MOCK_IN_UNIT,
+                0,
+                MOCK_START,
+                MOCK_END,
+                MOCK_WHITELIST_DURATION,
+                MOCK_IN_TARGET,
+            );
+            assert!(result.is_err());
+            // === when out_unit is positive
+            // ==== when in target is zero
+            let result = AzTokenSaleToAirdrop::new(
+                mock_airdrop_smart_contract(),
+                MOCK_IN_UNIT,
+                MOCK_OUT_UNIT,
+                MOCK_START,
+                MOCK_END,
+                MOCK_WHITELIST_DURATION,
+                0,
+            );
+            assert!(result.is_err());
+            // ==== when in target is positive
+            // ===== when in target is not a multiple of in unit
+            let result = AzTokenSaleToAirdrop::new(
+                mock_airdrop_smart_contract(),
+                MOCK_IN_UNIT,
+                MOCK_OUT_UNIT,
+                MOCK_START,
+                MOCK_END,
+                MOCK_WHITELIST_DURATION,
+                MOCK_IN_TARGET + 1,
+            );
+            // ===== * it raises an error
+            assert!(result.is_err());
+            // ===== when in target is a multiple of in unit
+            // ===== * it is valid
+            let result = AzTokenSaleToAirdrop::new(
+                mock_airdrop_smart_contract(),
+                MOCK_IN_UNIT,
+                MOCK_OUT_UNIT,
+                MOCK_START,
+                MOCK_END,
+                MOCK_WHITELIST_DURATION,
+                MOCK_IN_TARGET,
+            );
+            assert!(result.is_ok());
+        }
+
+        // === TEST QUERIES ===
         #[ink::test]
         fn test_config() {
             let (_accounts, az_token_sale_to_airdrop) = init();
