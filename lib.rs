@@ -176,11 +176,11 @@ mod az_token_sale_to_airdrop {
                     "Sold out".to_string(),
                 ));
             }
-            let new_in_amount: Balance = self.in_target - self.in_raised;
-            if in_amount > new_in_amount {
-                let refund_amount: Balance = in_amount - new_in_amount;
+            let max_in_amount: Balance = self.in_target - self.in_raised;
+            if in_amount > max_in_amount {
+                let refund_amount: Balance = in_amount - max_in_amount;
                 self.transfer_azero(caller, refund_amount)?;
-                in_amount = new_in_amount
+                in_amount = max_in_amount
             }
             let out_amount: Balance = (U256::from(in_amount) * U256::from(self.out_unit)
                 / U256::from(self.in_unit))
